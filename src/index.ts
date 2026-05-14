@@ -48,6 +48,24 @@ const CreateGitignoreSchema = z.object({
   templates: z.array(z.string()).describe("Templates to include (e.g., ['Python', 'Node'])"),
 });
 
+const CreateGitHubRepoSchema = z.object({
+  name: z.string().describe("Repository name"),
+  description: z.string().optional().describe("Repository description"),
+  private: z.boolean().optional().describe("Whether the repository should be private"),
+});
+
+const PushToRemoteSchema = z.object({
+  path: z.string().describe("Repository path"),
+  remote: z.string().describe("Remote name (e.g., 'origin')"),
+  branch: z.string().describe("Branch name to push"),
+});
+
+const AddRemoteSchema = z.object({
+  path: z.string().describe("Repository path"),
+  name: z.string().describe("Remote name (e.g., 'origin')"),
+  url: z.string().describe("Remote URL"),
+});
+
 // Define available tools
 const tools: Tool[] = [
   {
@@ -162,6 +180,72 @@ const tools: Tool[] = [
         },
       },
       required: ["path", "templates"],
+    },
+  },
+  {
+    name: "create_github_repo",
+    description: "Create a new GitHub repository",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Repository name",
+        },
+        description: {
+          type: "string",
+          description: "Repository description",
+        },
+        private: {
+          type: "boolean",
+          description: "Whether the repository should be private",
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "add_remote",
+    description: "Add a remote to a git repository",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Repository path",
+        },
+        name: {
+          type: "string",
+          description: "Remote name (e.g., 'origin')",
+        },
+        url: {
+          type: "string",
+          description: "Remote URL",
+        },
+      },
+      required: ["path", "name", "url"],
+    },
+  },
+  {
+    name: "git_push",
+    description: "Push commits to a remote repository",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Repository path",
+        },
+        remote: {
+          type: "string",
+          description: "Remote name (e.g., 'origin')",
+        },
+        branch: {
+          type: "string",
+          description: "Branch name to push",
+        },
+      },
+      required: ["path", "remote", "branch"],
     },
   },
 ];
@@ -410,6 +494,69 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: `Successfully created .gitignore at ${gitignorePath} with templates: ${templates.join(", ")}`,
+            },
+          ],
+        };
+      }
+
+      case "create_github_repo": {
+        if (!octokit) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "GitHub token not configured. Please set GITHUB_TOKEN environment variable in MCP settings.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const { name, description, private: isPrivate } = CreateGitHubRepoSchema.parse(args);
+        
+        const response = await octokit.repos.createForAuthenticatedUser({
+          name,
+          description,
+          private: isPrivate ?? false,
+        });
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Successfully created GitHub repository: ${response.data.full_name}\nURL: ${response.data.html_url}\nClone URL: ${response.data.clone_url}`,
+            },
+          ],
+        };
+      }
+
+      case "add_remote": {
+        const { path: repoPath, name: remoteName, url } = AddRemoteSchema.parse(args);
+        const git: SimpleGit = simpleGit(repoPath);
+        
+        await git.addRemote(remoteName, url);
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Successfully added remote '${remoteName}' with URL: ${url}`,
+            },
+          ],
+        };
+      }
+
+      case "git_push": {
+        const { path: repoPath, remote, branch } = PushToRemoteSchema.parse(args);
+        const git: SimpleGit = simpleGit(repoPath);
+        
+        await git.push(remote, branch, ['--set-upstream']);
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Successfully pushed ${branch} to ${remote}`,
             },
           ],
         };
